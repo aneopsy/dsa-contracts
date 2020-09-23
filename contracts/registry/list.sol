@@ -26,7 +26,7 @@ contract DSMath {
 contract Variables is DSMath {
 
     // InstaIndex Address.
-    address public constant instaIndex = 0x0000000000000000000000000000000000000000;
+    address public constant instaIndex = 0x4b0811B6489d61977812208C6FB023077bF21893;
 
     // Smart Account Count.
     uint64 public accounts;

@@ -1,85 +1,42 @@
 pragma solidity ^0.6.0;
 
-/**
- * @title ConnectBasic.
- * @dev Connector to deposit/withdraw assets.
- */
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface ERC20Interface {
-    function allowance(address, address) external view returns (uint);
-    function balanceOf(address) external view returns (uint);
-    function approve(address, uint) external;
-    function transfer(address, uint) external returns (bool);
-    function transferFrom(address, address, uint) external returns (bool);
-}
+// import files from common directory
+import {
+    TokenInterface,
+    MemoryInterface,
+    EventInterface
+} from "../common/interfaces.sol";
+import {Stores} from "../common/stores.sol";
+import {DSMath} from "../common/math.sol";
 
 interface AccountInterface {
     function isAuth(address _user) external view returns (bool);
 }
 
-interface MemoryInterface {
-    function getUint(uint _id) external returns (uint _num);
-    function setUint(uint _id, uint _val) external;
-}
+/**
+ * @title ConnectBasic.
+ * @dev Connector to deposit/withdraw assets.
+ */
 
-interface EventInterface {
-    function emitEvent(uint _connectorType, uint _connectorID, bytes32 _eventCode, bytes calldata _eventData) external;
-}
+contract BasicResolver is Stores {
+    event LogDeposit(
+        address indexed erc20,
+        uint256 tokenAmt,
+        uint256 getId,
+        uint256 setId
+    );
+    event LogWithdraw(
+        address indexed erc20,
+        uint256 tokenAmt,
+        address indexed to,
+        uint256 getId,
+        uint256 setId
+    );
 
-contract Memory {
-
-    /**
-     * @dev Return InstaMemory Address.
-     */
-    function getMemoryAddr() public pure returns (address) {
-        return 0x0000000000000000000000000000000000000000; // InstaMemory Address
-    }
-
-    /**
-     * @dev Return InstaEvent Address.
-     */
-    function getEventAddr() public pure returns (address) {
-        return 0x0000000000000000000000000000000000000000; // InstaEvent Address
-    }
-
-    /**
-     * @dev Get Stored Uint Value From InstaMemory.
-     * @param getId Storage ID.
-     * @param val if any value.
-     */
-    function getUint(uint getId, uint val) internal returns (uint returnVal) {
-        returnVal = getId == 0 ? val : MemoryInterface(getMemoryAddr()).getUint(getId);
-    }
-
-    /**
-     * @dev Store Uint Value In InstaMemory.
-     * @param setId Storage ID.
-     * @param val Value To store.
-     */
-    function setUint(uint setId, uint val) internal {
-        if (setId != 0) MemoryInterface(getMemoryAddr()).setUint(setId, val);
-    }
-
-    /**
-     * @dev Connector ID and Type.
-     */
-    function connectorID() public pure returns(uint _type, uint _id) {
-        (_type, _id) = (1, 2);
-    }
-
-}
-
-contract BasicResolver is Memory {
-
-    event LogDeposit(address indexed erc20, uint256 tokenAmt, uint256 getId, uint256 setId);
-    event LogWithdraw(address indexed erc20, uint256 tokenAmt, address indexed to, uint256 getId, uint256 setId);
-
-    /**
-     * @dev ETH Address.
-     */
-    function getEthAddr() public pure returns (address) {
-        return 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    }
+    using SafeERC20 for IERC20;
 
     /**
      * @dev Deposit Assets To Smart Account.
@@ -88,27 +45,36 @@ contract BasicResolver is Memory {
      * @param getId Get Storage ID.
      * @param setId Set Storage ID.
      */
-    function deposit(address erc20, uint tokenAmt, uint getId, uint setId) public payable {
-        uint amt = getUint(getId, tokenAmt);
+    function deposit(
+        address erc20,
+        uint256 tokenAmt,
+        uint256 getId,
+        uint256 setId
+    ) public payable {
+        uint256 amt = getUint(getId, tokenAmt);
         if (erc20 != getEthAddr()) {
-            ERC20Interface token = ERC20Interface(erc20);
-            amt = amt == uint(-1) ? token.balanceOf(msg.sender) : amt;
-            token.transferFrom(msg.sender, address(this), amt);
+            IERC20 token = IERC20(erc20);
+            amt = amt == uint256(-1) ? token.balanceOf(msg.sender) : amt;
+            token.safeTransferFrom(msg.sender, address(this), amt);
         } else {
-            require(msg.value == amt || amt == uint(-1), "invalid-ether-amount");
+            require(
+                msg.value == amt || amt == uint256(-1),
+                "invalid-ether-amount"
+            );
             amt = msg.value;
         }
         setUint(setId, amt);
 
         emit LogDeposit(erc20, amt, getId, setId);
 
-        bytes32 _eventCode = keccak256("LogDeposit(address,uint256,uint256,uint256)");
+        bytes32 _eventCode = keccak256(
+            "LogDeposit(address,uint256,uint256,uint256)"
+        );
         bytes memory _eventParam = abi.encode(erc20, amt, getId, setId);
-        (uint _type, uint _id) = connectorID();
-        EventInterface(getEventAddr()).emitEvent(_type, _id, _eventCode, _eventParam);
+        emitEvent(_eventCode, _eventParam);
     }
 
-   /**
+    /**
      * @dev Withdraw Assets To Smart Account.
      * @param erc20 Token Address.
      * @param tokenAmt Token Amount.
@@ -118,34 +84,36 @@ contract BasicResolver is Memory {
      */
     function withdraw(
         address erc20,
-        uint tokenAmt,
+        uint256 tokenAmt,
         address payable to,
-        uint getId,
-        uint setId
+        uint256 getId,
+        uint256 setId
     ) public payable {
-        require(AccountInterface(address(this)).isAuth(to), "invalid-to-address");
-        uint amt = getUint(getId, tokenAmt);
+        require(
+            AccountInterface(address(this)).isAuth(to),
+            "invalid-to-address"
+        );
+        uint256 amt = getUint(getId, tokenAmt);
         if (erc20 == getEthAddr()) {
-            amt = amt == uint(-1) ? address(this).balance : amt;
+            amt = amt == uint256(-1) ? address(this).balance : amt;
             to.transfer(amt);
         } else {
-            ERC20Interface token = ERC20Interface(erc20);
-            amt = amt == uint(-1) ? token.balanceOf(address(this)) : amt;
-            token.transfer(to, amt);
+            IERC20 token = IERC20(erc20);
+            amt = amt == uint256(-1) ? token.balanceOf(address(this)) : amt;
+            token.safeTransfer(to, amt);
         }
         setUint(setId, amt);
 
         emit LogWithdraw(erc20, amt, to, getId, setId);
 
-        bytes32 _eventCode = keccak256("LogWithdraw(address,uint256,address,uint256,uint256)");
+        bytes32 _eventCode = keccak256(
+            "LogWithdraw(address,uint256,address,uint256,uint256)"
+        );
         bytes memory _eventParam = abi.encode(erc20, amt, to, getId, setId);
-        (uint _type, uint _id) = connectorID();
-        EventInterface(getEventAddr()).emitEvent(_type, _id, _eventCode, _eventParam);
+        emitEvent(_eventCode, _eventParam);
     }
-
 }
 
-
 contract ConnectBasic is BasicResolver {
-    string public constant name = "Basic-v1";
+    string public constant name = "Basic-v1.1";
 }
